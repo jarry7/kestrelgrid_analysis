@@ -14,7 +14,7 @@ from .client import KGridClient
 from .common import utc, write_json
 from .frequency import PhaseConvention
 from .frequency_workflow import ensure_frequency
-from .plotting import MEASUREMENTS, build_figure, export_figure
+from .plotting import MEASUREMENTS, build_figure, build_measurements_figure, export_figure
 from .storage import analysis_directory, dataset_label, dataset_manifests
 from .workflow import (
     Selection,
@@ -96,8 +96,8 @@ class Explorer:
             description="Plot end", placeholder="Blank = all downloaded data"
         )
         self.columns = widgets.SelectMultiple(
-            options=[(name[0], key) for key, name in MEASUREMENTS.items()],
-            value=("voltage_v", "rms_v", "frequency_hz", "theta"),
+            options=[(name[0], key) for key, name in MEASUREMENTS.items() if key != "theta"],
+            value=("voltage_v", "rms_v", "frequency_hz"),
             description="Traces",
             rows=4,
         )
@@ -344,24 +344,29 @@ class Explorer:
             columns = [
                 column
                 for column in self.columns.value
-                if (column == "frequency_hz") == (product == "frequency")
+                if column
+                in (
+                    {"frequency_hz"}
+                    if product == "frequency"
+                    else {"rms_v", "frequency_hz"}
+                    if product == "measurements"
+                    else {"voltage_v"}
+                )
             ]
-            tables = {}
-            for wmu, original in source.items():
-                if hasattr(original, "plot_table"):
-                    table = original.plot_table(start, end, self.max_points.value)
-                else:
-                    table = original
-                    if start is not None:
-                        table = table[table.time_utc >= start]
-                    if end is not None:
-                        table = table[table.time_utc < end]
-                if not table.empty:
-                    tables[wmu] = table
+            tables = self._plot_tables(source, start, end)
+            frequency_tables = (
+                self._plot_tables(self.dataset.frequencies, start, end)
+                if product == "measurements"
+                else {}
+            )
             if (
                 not columns
-                or not tables
-                or not any(column in table for table in tables.values() for column in columns)
+                or not (tables or frequency_tables)
+                or not any(
+                    column in table
+                    for table in [*tables.values(), *frequency_tables.values()]
+                    for column in columns
+                )
             ):
                 continue
             label = (
@@ -370,7 +375,7 @@ class Explorer:
                 else self.dataset.manifest.get("analysis_name", "KGRID")
             )
             frequency_note = ""
-            if product == "frequency":
+            if product in {"frequency", "measurements"}:
                 sources = list(
                     dict.fromkeys(
                         item["frequency_source"]
@@ -379,15 +384,23 @@ class Explorer:
                     )
                 )
                 frequency_note = " · " + "; ".join(sources)
-            figure = go.FigureWidget(
-                build_figure(
+            if product == "measurements":
+                plot = build_measurements_figure(
+                    tables,
+                    frequency_tables,
+                    self.locations,
+                    self.max_points.value,
+                    f"{label} measurements{frequency_note}",
+                )
+            else:
+                plot = build_figure(
                     tables,
                     self.locations,
                     columns,
                     self.max_points.value,
                     f"{label} {product}{frequency_note}",
                 )
-            )
+            figure = go.FigureWidget(plot)
             figures[product] = figure
             widgets_to_show.append(figure)
         if not figures:
@@ -416,6 +429,22 @@ class Explorer:
             )
         for wmu, reason in self.dataset.manifest.get("frequency_unavailable", {}).items():
             self.status.value += f"<br>WMU {html.escape(wmu)} frequency: {html.escape(reason)}"
+
+    def _plot_tables(self, source, start, end):
+        """Filter product tables to local plot bounds without changing their native time grids."""
+        tables = {}
+        for wmu, original in source.items():
+            if hasattr(original, "plot_table"):
+                table = original.plot_table(start, end, self.max_points.value)
+            else:
+                table = original
+                if start is not None:
+                    table = table[table.time_utc >= start]
+                if end is not None:
+                    table = table[table.time_utc < end]
+            if not table.empty:
+                tables[wmu] = table
+        return tables
 
     def export(self):
         """Save current figure views and provenance and display repository-root file links."""

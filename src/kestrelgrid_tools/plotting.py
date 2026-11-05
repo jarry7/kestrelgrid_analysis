@@ -72,14 +72,31 @@ def display_series(table, column, max_points=20_000):
     return x, y, reduced
 
 
-def build_figure(tables, locations=None, columns=None, max_points=20_000, title="KGRID explorer"):
-    """tables maps WMU IDs to normalized dataframes; reduction affects display only."""
+def build_figure(
+    tables,
+    locations=None,
+    columns=None,
+    max_points=20_000,
+    title="KGRID explorer",
+    panel_tables=None,
+):
+    """Build shared-time panels from WMU dataframes with optional per-column sources.
+
+    ``panel_tables`` maps column names to independent WMU tables, preserving distinct
+    measurement and estimated-frequency time grids without interpolation or resampling.
+    Reduction affects display only.
+    """
     tables = {
         wmu: table.plot_table(max_points=max_points) if hasattr(table, "plot_table") else table
         for wmu, table in tables.items()
     }
     columns = columns or list(MEASUREMENTS)
-    available = [column for column in columns if any(column in table for table in tables.values())]
+    sources = {column: (panel_tables or {}).get(column, tables) for column in columns}
+    available = [
+        column
+        for column in columns
+        if any(column in table and not table.empty for table in sources[column].values())
+    ]
     if not available:
         raise ValueError("No selected measurements available")
     figure = make_subplots(
@@ -90,17 +107,19 @@ def build_figure(tables, locations=None, columns=None, max_points=20_000, title=
     )
     reduced = False
     intervals = []
-    for color_index, (wmu, table) in enumerate(tables.items()):
-        if table.empty:
-            continue
+    devices = list(dict.fromkeys(wmu for column in available for wmu in sources[column]))
+    for color_index, wmu in enumerate(devices):
         location = (locations or {}).get(wmu, {}).get("location", "Unknown location")
         label = f"{wmu} — {location}"
-        if "gps_locked" in table:
-            label += f" · GPS locked {table.gps_locked.mean():.0%}"
-        intervals.extend([table.time_utc.min(), table.time_utc.max()])
+        legend_shown = False
         for row, column in enumerate(available, 1):
-            if column not in table:
+            table = sources[column].get(wmu)
+            if table is None or table.empty or column not in table:
                 continue
+            trace_label = label
+            if "gps_locked" in table:
+                trace_label += f" · GPS locked {table.gps_locked.mean():.0%}"
+            intervals.extend([table.time_utc.min(), table.time_utc.max()])
             x, y, downsampled = display_series(table, column, max_points)
             reduced |= downsampled
             figure.add_trace(
@@ -108,9 +127,9 @@ def build_figure(tables, locations=None, columns=None, max_points=20_000, title=
                     x=x,
                     y=y,
                     mode="lines",
-                    name=label,
+                    name=trace_label,
                     legendgroup=wmu,
-                    showlegend=row == 1,
+                    showlegend=not legend_shown,
                     connectgaps=False,
                     line={"color": COLORS[color_index % len(COLORS)], "width": 1},
                     hovertemplate="%{x}<br>%{y:.6g}<extra>%{fullData.name}</extra>",
@@ -118,6 +137,7 @@ def build_figure(tables, locations=None, columns=None, max_points=20_000, title=
                 row=row,
                 col=1,
             )
+            legend_shown = True
             figure.update_yaxes(title_text=MEASUREMENTS[column][1], row=row, col=1)
     if not intervals:
         raise ValueError("No samples in selected plot interval")
@@ -137,6 +157,28 @@ def build_figure(tables, locations=None, columns=None, max_points=20_000, title=
     )
     figure.update_xaxes(type="date", title_text="Time (UTC)", row=len(available), col=1)
     return figure
+
+
+def build_measurements_figure(
+    measurements,
+    frequencies,
+    locations=None,
+    max_points=20_000,
+    title="KGRID measurements",
+):
+    """Plot RMS above frequency using each product's native timestamps and gap information.
+
+    Theta is retained as source data but is not included in the measurements figure.
+    An unavailable product is omitted rather than fabricated or interpolated.
+    """
+    return build_figure(
+        measurements,
+        locations=locations,
+        columns=["rms_v", "frequency_hz"],
+        max_points=max_points,
+        title=title,
+        panel_tables={"rms_v": measurements, "frequency_hz": frequencies},
+    )
 
 
 def export_figure(

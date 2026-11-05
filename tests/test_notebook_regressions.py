@@ -75,3 +75,18 @@ def test_pjm_presets_timezone_duration_and_routing():
     explorer.preset.value = "day"
     assert explorer.selection().requested_seconds == 86400
     assert explorer.selection().products == ("measurements",)
+
+
+def test_notebook_measurements_uses_rms_then_frequency(tmp_path):
+    """Use the frequency product in notebook measurements instead of source theta."""
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/wmu_locations.json").write_text('{"4021":{"location":"Vancouver"}}')
+    explorer = Explorer(tmp_path)
+    explorer.dataset = demo_dataset(tmp_path)
+    explorer.render()
+    figure = explorer.figures["measurements"]
+    assert [annotation.text for annotation in figure.layout.annotations] == [
+        "Voltage RMS",
+        "System frequency",
+    ]
+    assert "frequency" in explorer.figures

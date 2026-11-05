@@ -51,6 +51,12 @@ in manifests or exports.
    full-resolution waveform window without another download.
 5. **Export current view** saves modified zoom ranges and visible traces.
 
+The `*_measurements.png` and `*_measurements.html` figures show **RMS voltage above frequency**
+on a shared time axis. Frequency uses its selected stored/waveform/theta-derived source and
+retains its native timestamps; RMS and frequency are not interpolated onto a common grid.
+Theta remains available in the source measurement dataframe. Separate frequency exports are
+also available.
+
 Advanced settings contain the transfer budget, numeric WMU override, phase convention,
 display point limit and PNG dimensions. Changing controls does not trigger downloads.
 

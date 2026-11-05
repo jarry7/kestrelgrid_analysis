@@ -5,7 +5,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
-from kestrelgrid_tools.plotting import build_figure, display_series, export_figure
+from kestrelgrid_tools.plotting import (
+    build_figure,
+    build_measurements_figure,
+    display_series,
+    export_figure,
+)
 from kestrelgrid_tools.workflow import demo_dataset, load_dataset
 
 
@@ -53,3 +58,34 @@ def test_frequency_edges_do_not_force_reduction():
     _, y, reduced = display_series(table, "frequency_hz", 20000)
     assert not reduced
     assert sum(value == 60.01 for value in y if value is not None) == 13998
+
+
+def test_measurements_panels_preserve_independent_rms_and_frequency_times(tmp_path):
+    """Place RMS above frequency without joining mismatched clocks or plotting theta."""
+    measurements = pd.DataFrame(
+        {
+            "time_utc": pd.date_range("2026-07-22T11:30:00.2Z", periods=4, freq="500ms"),
+            "rms_v": [120.0, 121.0, 122.0, 121.0],
+            "theta": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+    frequency = pd.DataFrame(
+        {
+            "time_utc": pd.date_range("2026-07-22T11:30:01Z", periods=3, freq="500ms"),
+            "frequency_hz": [60.0, 60.05, 60.02],
+        }
+    )
+    figure = build_measurements_figure({"4012": measurements}, {"4012": frequency})
+    assert [annotation.text for annotation in figure.layout.annotations] == [
+        "Voltage RMS",
+        "System frequency",
+    ]
+    assert figure.layout.yaxis.title.text == "RMS (V)"
+    assert figure.layout.yaxis2.title.text == "Frequency (Hz)"
+    assert figure.data[0].yaxis == "y" and figure.data[1].yaxis == "y2"
+    assert len(figure.data[0].x) == 5 and len(figure.data[1].x) == 4
+    assert "00.200000Z" in figure.data[0].x[0]
+    assert "01.000000Z" in figure.data[1].x[0]
+    output = export_figure(figure, tmp_path, name="example_measurements", formats=("html",))[0]
+    assert "System frequency" in output.read_text()
+    assert "Phase angle" not in output.read_text()
