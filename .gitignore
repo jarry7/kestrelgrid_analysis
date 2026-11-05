@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# KGRID credentials, downloads, and generated plots
+/data/
+/credentials.json
+**/credentials*.json
+*.part
+/.jupyter/
+.DS_Store

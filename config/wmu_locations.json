@@ -1,0 +1,14 @@
+{
+  "2003": {"location": "Pullman, WA", "gps_equipped": false},
+  "2004": {"location": "Vancouver, WA", "gps_equipped": false},
+  "2005": {"location": "Berkeley, CA", "gps_equipped": false},
+  "2007": {"location": "Boise, ID", "gps_equipped": false},
+  "1002": {"location": "Salt Lake City, UT", "gps_equipped": false},
+  "1010": {"location": "Phoenix, AZ", "gps_equipped": false},
+  "4011": {"location": "Nashville, TN", "gps_equipped": false},
+  "4013": {"location": "Lyon, France", "gps_equipped": false},
+  "4012": {"location": "Charlottesville, VA", "gps_equipped": false},
+  "4016": {"location": "Riverside, CA", "gps_equipped": false},
+  "4021": {"location": "Vancouver, WA (GPS)", "gps_equipped": true},
+  "4023": {"location": "Seattle, WA", "gps_equipped": false}
+}
