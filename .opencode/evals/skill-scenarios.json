@@ -1,0 +1,42 @@
+{
+  "suite": "kgrid-project-skills",
+  "evaluation_mode": "offline planning and cached regression guidance; no network, edits, commits or downloads",
+  "scenarios": [
+    {
+      "id": "duration-boundary",
+      "prompt": "Download WMU 4012 for 2026-07-22 11:30 UTC through 12:30:01 UTC and make the plots. Explain the acquisition steps before doing anything.",
+      "skills": ["kgrid-data-acquisition"],
+      "expected": ["Requested duration is 3601 seconds", "Parquet-only sources; no raw/7z probes or downloads", "Cache-first reuse", "Preserve UTC bounds and native cadence"]
+    },
+    {
+      "id": "eastern-day-partitions",
+      "prompt": "Use the full July 22, 2026 Eastern calendar day for Charlottesville and compare it with the PJM presentation. Which files and UTC bounds are needed?",
+      "skills": ["kgrid-data-acquisition", "kgrid-notebook-validation"],
+      "expected": ["04:00 UTC July 22 to 04:00 UTC July 23", "July 21 and 22 Pacific partitions", "Parquet only", "Presentation timezone assumption explicit", "4012 is Charlottesville; 4011 is regional comparison outside PJM"]
+    },
+    {
+      "id": "unknown-frequency",
+      "prompt": "A two-hour Parquet-only request for WMU 4013 has theta but no frequency. Can we apply WMU 4012's 60 Hz phase convention automatically?",
+      "skills": ["kgrid-frequency-analysis"],
+      "expected": ["Do not generalize conventions between WMUs", "Do not guess Lyon reference", "Preserve long-window no-raw rule", "Use existing evidence/cache or request a separate explicit validation interval", "Explain units/reference/sign and aliasing"]
+    },
+    {
+      "id": "notebook-links-and-panels",
+      "prompt": "The notebook runs from notebooks/ and measurements exports say they do not exist. I also need RMS above frequency instead of theta. How would you reproduce and fix it?",
+      "skills": ["kgrid-notebook-validation"],
+      "expected": ["Named kernel and restart/run cells", "Actual browser widgets rather than headless-only proof", "Repository-root /files/ links", "Independent RMS/frequency clocks without interpolation", "Cached hour/day checks and PNG/HTML verification"]
+    },
+    {
+      "id": "rename-analysis-offline",
+      "prompt": "Rename my cached July 22 analysis to Dominion event review. Keep all samples and make the folders meaningful without downloading again. Propose the exact storage behavior.",
+      "skills": ["kgrid-analysis-storage"],
+      "expected": ["Safe display slug", "Identity independent of label and budget", "Local copy/reuse before authentication", "Hash verification and non-overwriting versions", "Update plot metadata and labels", "No fixed parent-depth root assumptions"]
+    },
+    {
+      "id": "generic-python-negative",
+      "prompt": "Explain Python's pathlib relative_to method with a short example; do not change any files.",
+      "skills": [],
+      "expected": ["Answer directly without KGRID-specific workflow or skill loading"]
+    }
+  ]
+}

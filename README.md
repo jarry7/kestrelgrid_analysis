@@ -224,3 +224,11 @@ Tests use synthetic frames/Parquet and injected HTTP sessions. Docstrings are re
 every authored module, class, function and method, including nested helpers. Notebook outputs
 are cleared before version control. Technical comments describe format/algorithm constraints;
 implementation history is not embedded in source.
+
+## Agent guidance
+
+[AGENTS.md](AGENTS.md) defines repository-wide development and data-handling rules.
+Project-specific acquisition, frequency, notebook validation and storage workflows are in
+[.opencode/skills/](.opencode/skills/), with sourced implementation references and offline
+evaluation scenarios alongside them. OpenCode discovers these project skills automatically;
+restart OpenCode after adding or changing skill definitions.
