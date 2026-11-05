@@ -1,0 +1,10 @@
+{
+  "source_url": "https://www.pjm.com/-/media/DotCom/committees-groups/committees/oc/2026/20260806/20260806-item-05---dominion-july-loss-of-load-event---presentation.pdf",
+  "event_time_assumption": "Presentation local times interpreted as America/New_York (EDT, UTC-04:00); timezone not explicitly labelled in the slides",
+  "event_utc": "2026-07-22T11:56:09Z",
+  "devices": ["4012", "4011"],
+  "windows": {
+    "hour": {"start_utc": "2026-07-22T11:30:00Z", "end_utc": "2026-07-22T12:30:00Z"},
+    "day": {"start_utc": "2026-07-22T04:00:00Z", "end_utc": "2026-07-23T04:00:00Z"}
+  }
+}

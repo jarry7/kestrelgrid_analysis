@@ -1,0 +1,49 @@
+{
+  "4012": {
+    "convention": {"reference_hz": 60.0, "units": "radians", "sign": 1},
+    "evidence": {
+      "status": "empirically verified against July 22 simultaneous waveform",
+      "validation_start_utc": "2026-07-22T11:30:00.810502052+00:00",
+      "validation_end_utc": "2026-07-22T12:29:58.805331945+00:00",
+      "raw_source": "4012/2026-07-22.raw",
+      "phase_source": "4012/2026-07-22.parquet",
+      "correlation": 0.9998322707484957,
+      "rmse_hz": 0.0003367480922886886,
+      "comparison_samples": 7197,
+      "method": "candidate theta derivatives versus one-second waveform zero-crossing regression",
+      "gps_locked": true
+    }
+  },
+  "4011": {
+    "convention": {"reference_hz": 60.0, "units": "radians", "sign": 1},
+    "evidence": {
+      "status": "empirically verified against July 22 simultaneous waveform; source not GPS locked",
+      "validation_start_utc": "2026-07-22T11:30:01.076217890+00:00",
+      "validation_end_utc": "2026-07-22T12:29:58.947299957+00:00",
+      "raw_source": "4011/2026-07-22.raw",
+      "phase_source": "4011/2026-07-22.parquet",
+      "correlation": 0.9986640849613262,
+      "rmse_hz": 0.0009817751428847718,
+      "comparison_samples": 7129,
+      "method": "candidate theta derivatives versus one-second waveform zero-crossing regression",
+      "gps_locked": false,
+      "timing_note": "Seven raw timing discontinuities in this test; overlapping/backward samples excluded"
+    }
+  },
+  "4021": {
+    "convention": {"reference_hz": 60.0, "units": "radians", "sign": 1},
+    "evidence": {
+      "status": "empirically verified on cached simultaneous waveform and Parquet theta",
+      "validation_start_utc": "2026-11-05T07:00:00Z",
+      "validation_end_utc": "2026-11-05T07:59:50Z",
+      "source_dataset": "7e56e8abb645fa71",
+      "raw_source": "4021/2026-11-04.raw",
+      "phase_source": "4021/2026-11-04.parquet",
+      "method": "one-second positive-zero-crossing cycle regression versus unwrapped theta derivative",
+      "correlation": 0.9993139072903,
+      "rmse_hz": 0.0005157814294370556,
+      "median_absolute_error_hz": 0.00029239048581786165,
+      "note": "Applies to this WMU's observed theta product; revalidate if provider conventions change. Not a calibration or PMU compliance claim."
+    }
+  }
+}

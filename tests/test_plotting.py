@@ -34,3 +34,13 @@ def test_offline_html_snapshot_cache_and_hash_check(tmp_path):
     path.write_bytes(path.read_bytes() + b"changed")
     with pytest.raises(ValueError, match="hash mismatch"):
         load_dataset(dataset.directory)
+
+
+def test_frequency_edges_do_not_force_reduction():
+    table = pd.DataFrame({
+        "time_utc": pd.date_range("2026-01-01", periods=14000, freq="500ms", tz="UTC"),
+        "frequency_hz": np.r_[np.nan, np.full(13998, 60.01), np.nan],
+    })
+    _, y, reduced = display_series(table, "frequency_hz", 20000)
+    assert not reduced
+    assert sum(value == 60.01 for value in y if value is not None) == 13998

@@ -10,17 +10,26 @@ from .common import utc
 from .raw_validation import validate_raw
 
 
-def read_waveform(path: Path, start=None, end=None, max_samples=5_000_000):
+def read_waveform(path: Path, start=None, end=None, max_samples=5_000_000, allow_time_discontinuities=False):
     if path.stat().st_size > min(max_samples * 90, 128 * 1024**2):
         raise ValueError("Raw input exceeds sample-memory limit")
-    metadata = validate_raw(path.read_bytes())
+    metadata = validate_raw(path.read_bytes(), allow_time_discontinuities=allow_time_discontinuities)
     count = sum(frame.n_samples for frame in metadata)
     if count > max_samples:
         raise ValueError(f"{count:,} samples exceed memory limit {max_samples:,}")
     frames, corrupted = raw_reader.read_raw(str(path), scale_data=True)
     if corrupted or not frames:
         raise ValueError("Upstream reader found corrupt or empty data")
-    times, voltage = raw_reader.raw_to_tv(str(path))
+    has_backward_time = any(current.timestamp <= previous.timestamp
+                            for previous, current in zip(metadata, metadata[1:]))
+    if has_backward_time and allow_time_discontinuities:
+        # Upstream raw_to_tv updates its lower bound while reading and can silently skip
+        # backward frames. read_raw (without bounds) preserves them for explicit QA.
+        times = np.concatenate([frame["start_time"] + np.arange(len(frame["data"])) /
+                                (frame["sample_rate"] * 1000) for frame in frames])
+        voltage = np.concatenate([frame["data"] for frame in frames])
+    else:
+        times, voltage = raw_reader.raw_to_tv(str(path))
     if len(times) != count or len(voltage) != count:
         raise ValueError("Upstream sample count mismatch")
     expected = np.concatenate([

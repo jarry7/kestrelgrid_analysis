@@ -1,5 +1,68 @@
 # KGRID notebook implementation instructions and decisions
 
+## Current entry point and duration rule
+
+### July 22 PJM browser regression verification
+
+See `PJM_JULY22_VERIFICATION.md` for full windows, source timing assumptions, datasets and
+outcomes. Actual JupyterLab widget tests passed for devices 4012 (Charlottesville) and 4011
+(Nashville), each for a one-hour event window and the full Eastern day. Added these presets.
+Fixed export links relative to the notebook working directory, tolerant-but-reported raw
+timing discontinuities, and the upstream converter's skipping of backward frames.
+Nashville's hour excludes 64,417 overlapping samples and reports seven timing discontinuities.
+
+Added `uv run kgrid-notebook` with a named project kernel. Saved obsolete widgets must be
+rerun, so clear outputs after verification and instruct Restart Kernel and Run All Cells.
+Both Eastern devices now have independently verified theta conventions. Day requests remain
+Parquet-only. Clicked HTML/PNG links returned HTTP 200; standalone HTML zoom and visibility
+worked. Final regression suite: 37 passed, Ruff/whitespace checks passed.
+
+### Automatic frequency outcome
+
+Frequency gets its own figure/PNG/HTML by default: stored Parquet frequency first, otherwise
+one-second interpolated-positive-zero-crossing waveform regression at 2 estimates/s, otherwise
+segment-aware theta derivatives with a verified per-WMU convention. Read bounded full-resolution
+batches, reject invalid timing/cycles/fits, and leave unsupported edges unavailable.
+
+WMU 4021's cached hour establishes radians/60 Hz/+derivative: 0.9993 correlation and 0.00052 Hz
+RMSE at theta timestamps; the automatic half-second-grid estimator revalidates it at 0.9984 and
+0.00080 Hz. Evidence is in `config/frequency_conventions.json`. Other device candidates require
+>=30 comparisons, sufficient waveform variation, RMSE <0.005 Hz, correlation >=0.8 and a distinct
+winner. Persist learned evidence in ignored `data/frequency_conventions.json`.
+
+Upgrade cached data locally without a download. Retain unchanged source measurements/theta;
+store frequency separately with hashes, source, quality, units/reference/sign and validation
+evidence in manifests. Stored frequency always takes precedence, including with user overrides.
+Low-rate phase aliasing remains a limitation. This supersedes earlier opt-in-only theta handling.
+
+The notebook starts with **one WMU device and explicit UTC start/end times**.
+**Download and plot** performs discovery, transfer, decoding, interactive rendering, and
+automatic PNG + standalone HTML export. Preview is optional; settings beyond device/window
+are grouped under Advanced settings. Output filenames contain the device and requested window.
+
+The requested duration determines products in `Selection`, before any transfer:
+
+- `0 < duration <= 3600 seconds`: raw waveform interval + available Parquet measurements.
+- `duration > 3600 seconds`: Parquet only, with no raw/7z payload or probe requests.
+- Preserve Parquet's native cadence; this is product selection, not extra temporal averaging.
+
+Defined intervals are never silently replaced. Select all intersecting daily/hourly partitions,
+deduplicate measurements, report missing partitions and actual timestamp coverage. The rule
+uses requested duration even if returned data covers only part of the request.
+
+To support a full hour, stream raw payloads to disk, decode bounded frame-aligned chunks
+(~250,000 samples) through public `kestrelgrid` methods, write normalized Parquet row groups,
+and calculate full-resolution statistics incrementally. `WaveformStore` loads local short
+windows or builds min/max previews in bounded passes; it does not materialize an hour in RAM.
+The old five-million-sample whole-window cap is replaced by a 240-million-sample disk limit,
+with the transfer budget enforced separately. A 4 ksps hour is 14.4 million samples (~27.5 MiB
+raw payload); high-rate units may need larger transfer budgets. Preflight first/last frame
+headers estimate payload plus probe allowance before waveform download.
+
+Default Python selection is explicit interval. Latest remains a lower-level compatibility
+mode, subject to the same duration routing rule. Configuration example:
+`config/plots/time_window.json`.
+
 ## Repository and deliverable
 
 - Repository: https://github.com/jarry7/kestrelgrid_analysis (public; default branch `main`).
@@ -45,9 +108,10 @@ GPS-equipped is a hardware note, not an assertion that all samples are GPS-locke
 
 ## 3. Define a selection
 
-Implement `Selection` with WMU IDs, latest/explicit interval, duration, products, transfer
-budget and sample-memory limit. Defaults: 4021, latest closed partition, 60 seconds,
-waveform plus measurements, 100 MiB cumulative transfer budget, five million waveform samples.
+Implement `Selection` with device IDs, explicit UTC interval, automatic products, transfer
+budget and disk sample limit. Notebook default: 4021, an editable recent minute,
+100 MiB cumulative transfer budget. Use bounded decoding and disk-backed waveform storage;
+the five-million-row limit applies only to combined measurement dataframes.
 
 UTC start/end must be timezone-aware. Normalized selection uses `[start, end)` while the
 intermediate raw sample contains complete boundary frames. Latest resolves to actual recorded
@@ -130,7 +194,8 @@ convention in export metadata; do not overwrite stored frequency.
 ## 7. Notebook controls and exports
 
 Use ipywidgets and Plotly FigureWidget/anywidget. Run all cells without any network request.
-Provide selection/preview/download controls, local dataset reload, clearly labelled synthetic
+Provide device/window controls and one-action download/render/PNG+HTML export, optional preview,
+local dataset reload, clearly labelled synthetic
 demo, local plot interval/traces/point limit, explicit theta convention, export prefix/formats/
 PNG dimensions. Handle actionable errors in a status panel without printing credential objects.
 
@@ -169,6 +234,35 @@ Account/WMU/file/bandwidth details were supplied by the user. The published pack
 and authenticated server listings/small sample were inspected directly during implementation.
 
 ## Completed verification (2026-11-05)
+
+### Updated time-window workflow
+
+- Automatic frequency added and checked locally against previously downloaded data. The hour
+  produces 7,197 valid waveform estimates; the two-hour Parquet-only window produces 14,379
+  valid theta-derived estimates. Dedicated `_frequency.png` and `_frequency.html` exports
+  are created. Unknown WMU conventions are not guessed, and stored frequency is never overridden.
+- Estimator tests cover 50/60 Hz, harmonic distortion, batch boundaries, timing gaps, missing
+  cycles, phase-convention evidence, registry cache invalidation and unchanged stored values.
+- The notebook executes with the frequency figure and both exports from cached two-hour data.
+- Final frequency checks: 34 tests passed; Ruff and Git whitespace checks passed. The
+  two-hour frequency export retains all 14,381 rows (14,379 finite frequency values).
+
+- Final checks: 24 tests passed; Ruff and Git whitespace checks passed. Dependency timedelta
+  deprecation warnings remain non-failing. Saved notebook outputs are empty.
+- Boundary tests cover 3599, 3600, 3600.001 and 86400 seconds; long-window tests assert no
+  raw sampling or waveform estimate calls and preserve Parquet's native cadence.
+- A synthetic complete hour (14.4 million samples) was decoded in >50 bounded chunks;
+  min/max overview and full-resolution local cycle views passed.
+- Updated notebook executed through nbclient, with offline widgets and PNG/HTML exports.
+- Live one-action minute: 240,000 waveform samples; PNG/HTML automatically saved under
+  `data/processed/5fa1d4534bc94f52/plots/`.
+- Live two-hour request: 14,381 measurement records, Parquet only; no waveform sources.
+  Outputs: `data/processed/b93ab996a393816a/plots/`.
+- Live exactly-one-hour request: 14,400,019 samples (frame timing is not exactly nominal),
+  7,181 Parquet records; 30.70 MiB transferred including probes. Disk-backed normalization
+  and PNG/HTML hour overview succeeded: `data/processed/7e56e8abb645fa71/plots/`.
+
+### Original sample workflow verification
 
 - `uv run pytest -q`: 15 passed; one NumPy/pandas timedelta deprecation warning.
 - `uv run ruff check .`: passed.

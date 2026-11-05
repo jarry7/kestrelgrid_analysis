@@ -42,7 +42,7 @@ def header_at(data: bytes, offset: int = 0) -> FrameInfo:
     )
 
 
-def validate_raw(data: bytes, expected_wmu: str | None = None) -> list[FrameInfo]:
+def validate_raw(data: bytes, expected_wmu: str | None = None, allow_time_discontinuities=False) -> list[FrameInfo]:
     frames = []
     offset = 0
     while offset < len(data):
@@ -54,13 +54,40 @@ def validate_raw(data: bytes, expected_wmu: str | None = None) -> list[FrameInfo
             raise ValueError(f"Truncated raw payload at byte {offset}")
         if expected_wmu is not None and frame.wmu != str(expected_wmu):
             raise ValueError("Raw sensor ID does not match selected WMU")
-        if frames and (frame.wmu != frames[0].wmu or frame.timestamp <= frames[-1].timestamp):
+        if frames and (frame.wmu != frames[0].wmu or
+                       (frame.timestamp <= frames[-1].timestamp and not allow_time_discontinuities)):
             raise ValueError("Mixed sensors or unordered raw frame timestamps")
         frames.append(frame)
         offset += frame.n_bytes
     if not frames:
         raise ValueError("No complete raw frames")
     return frames
+
+
+def iter_raw_frames(path, expected_wmu=None, allow_time_discontinuities=False):
+    """Validate a file's structure with bounded memory, yielding frame offsets."""
+    size = path.stat().st_size
+    previous = None
+    with path.open("rb") as handle:
+        while handle.tell() < size:
+            offset = handle.tell()
+            try:
+                frame = header_at(handle.read(HEADER_LENGTH_BYTES))
+            except (EOFError, DataCorruptionError, ValueError):
+                raise ValueError(f"Invalid or truncated raw header at byte {offset}") from None
+            frame.offset = offset
+            if offset + frame.n_bytes > size:
+                raise ValueError(f"Truncated raw payload at byte {offset}")
+            if expected_wmu is not None and frame.wmu != str(expected_wmu):
+                raise ValueError("Raw sensor ID does not match selected WMU")
+            if previous and (frame.wmu != previous.wmu or
+                             (frame.timestamp <= previous.timestamp and not allow_time_discontinuities)):
+                raise ValueError("Mixed sensors or unordered raw frame timestamps")
+            yield frame
+            previous = frame
+            handle.seek(offset + frame.n_bytes)
+    if previous is None:
+        raise ValueError("No complete raw frames")
 
 
 def align_frames(data: bytes, expected_wmu: str) -> tuple[bytes, int, list[FrameInfo]]:

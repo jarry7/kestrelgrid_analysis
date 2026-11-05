@@ -30,15 +30,21 @@ def display_series(table, column, max_points=20_000):
     positive = delta[delta > 0]
     cadence = np.median(positive) if len(positive) else np.inf
     finite = np.isfinite(values)
+    discontinuity = delta > cadence * 1.5
+    if table.attrs.get("display_reduced"):
+        # Sparse extrema have irregular spacing by design, not recording gaps.
+        discontinuity = np.diff(table["segment"].to_numpy()) != 0 if "segment" in table else np.zeros(len(delta), dtype=bool)
     breaks = np.flatnonzero(
-        (delta > cadence * 1.5) | (delta <= 0) | ~finite[:-1] | ~finite[1:]
+        discontinuity | (delta <= 0) | ~finite[:-1] | ~finite[1:]
     ) + 1
     pieces = np.split(np.arange(len(table)), breaks)
     if len(pieces) * 3 > max_points:
         raise ValueError("Too many disjoint segments for display limit; select a shorter interval")
     x, y = [], []
-    reduced = len(table) > max_points
-    budget = max(4, (max_points - len(pieces)) // max(1, len(pieces)))
+    reduced = len(table) > max_points or table.attrs.get("display_reduced", False)
+    budget = len(table) if len(table) + len(pieces) <= max_points else max(
+        4, (max_points - len(pieces)) // max(1, len(pieces))
+    )
     for indices in pieces:
         if not len(indices):
             continue
@@ -62,6 +68,10 @@ def display_series(table, column, max_points=20_000):
 
 def build_figure(tables, locations=None, columns=None, max_points=20_000, title="KGRID explorer"):
     """tables maps WMU IDs to normalized dataframes; reduction affects display only."""
+    tables = {
+        wmu: table.plot_table(max_points=max_points) if hasattr(table, "plot_table") else table
+        for wmu, table in tables.items()
+    }
     columns = columns or list(MEASUREMENTS)
     available = [column for column in columns if any(column in table for table in tables.values())]
     if not available:

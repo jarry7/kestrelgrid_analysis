@@ -3,11 +3,12 @@
 import html
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 import ipywidgets as widgets
 import pandas as pd
 import plotly.graph_objects as go
-from IPython.display import display
+from IPython.display import HTML, display
 
 from .client import KGridClient
 from .common import utc, write_json
@@ -31,25 +32,29 @@ class Explorer:
         self.figures = {}
         self.client = None
         self.preview_selection = None
-        self.wmus = widgets.SelectMultiple(
+        self.wmu = widgets.Dropdown(
             options=[(f"{wmu} — {value['location']}", wmu) for wmu, value in self.locations.items()],
-            value=("4021",), description="WMUs", rows=6,
+            value="4021", description="WMU device", layout=widgets.Layout(width="450px"),
         )
-        self.extra = widgets.Text(description="Other IDs", placeholder="e.g. 4015,5001")
-        self.mode = widgets.Dropdown(options=[("Latest closed archive", "latest"), ("UTC interval", "interval")])
-        self.duration = widgets.FloatText(value=60, description="Seconds")
-        self.start = widgets.Text(description="Start UTC", placeholder="2026-11-04T12:00:00Z")
-        self.end = widgets.Text(description="End UTC", placeholder="2026-11-04T12:01:00Z")
-        self.products = widgets.SelectMultiple(
-            options=[("Raw waveform", "waveform"), ("RMS / theta / frequency", "measurements")],
-            value=("waveform", "measurements"), description="Products",
+        self.extra = widgets.Text(description="Other WMU", placeholder="Optional numeric device ID")
+        # A concrete recent UTC window, never a silently resolved 'latest' request.
+        default_end = pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=1) + pd.Timedelta(hours=12)
+        self.start = widgets.Text(description="Start UTC", value=(default_end - pd.Timedelta(minutes=1)).isoformat(),
+                                  layout=widgets.Layout(width="450px"))
+        self.end = widgets.Text(description="End UTC", value=default_end.isoformat(),
+                                layout=widgets.Layout(width="450px"))
+        self.route = widgets.HTML()
+        self.preset = widgets.Dropdown(
+            options=[("Custom window", "custom"), ("PJM July 22 — event hour (07:30–08:30 EDT)", "hour"),
+                     ("PJM July 22 — full Eastern day (Parquet only)", "day")],
+            value="custom", description="Time preset", layout=widgets.Layout(width="650px"),
         )
         self.budget = widgets.FloatText(value=100, description="Max MiB")
         self.credentials = widgets.Text(
             value="~/.config/kestrelgrid/credentials.json", description="Credentials",
             layout=widgets.Layout(width="650px"),
         )
-        self.phase_enabled = widgets.Checkbox(value=False, description="Derive frequency using my phase convention")
+        self.phase_enabled = widgets.Checkbox(value=False, description="Override automatic theta convention")
         self.reference = widgets.FloatText(value=60, description="Reference Hz")
         self.units = widgets.Dropdown(options=["radians", "degrees"], description="Theta units")
         self.sign = widgets.Dropdown(options=[("+ derivative", 1), ("− derivative", -1)], description="Sign")
@@ -66,36 +71,49 @@ class Explorer:
         self.height = widgets.IntText(value=900, description="PNG height")
         self.scale = widgets.FloatText(value=2, description="PNG scale")
         self.cache = widgets.Dropdown(description="Local dataset", layout=widgets.Layout(width="650px"))
-        self.status = widgets.HTML("Ready. Discover or load a local/synthetic dataset.")
+        self.status = widgets.HTML("Choose a device and UTC time window, then Download and plot.")
         self.output = widgets.Output()
         self.plots = widgets.VBox()
         self.refresh_cache()
-        self.discover_button = self.button("1. Discover / preview", self.discover, "info")
-        self.download_button = self.button("2. Download selected", self.download, "success")
-        self.render_button = self.button("3. Update plots (local)", self.render, "info")
-        self.export_button = self.button("4. Export current view", self.export, "success")
+        self.discover_button = self.button("Preview source files", self.discover, "info")
+        self.download_button = self.button("Download and plot", self.download, "success")
+        self.render_button = self.button("Update plots (local)", self.render, "info")
+        self.export_button = self.button("Export current view", self.export, "success")
         self.load_button = self.button("Load local dataset", self.load)
         self.demo_button = self.button("Offline synthetic demo", self.demo)
         self.refresh_button = self.button("Refresh local list", self.refresh_cache)
-        self.mode.observe(self.update_mode, names="value")
-        self.update_mode()
+        self.start.observe(self.update_route, names="value")
+        self.end.observe(self.update_route, names="value")
+        self.preset.observe(self.apply_preset, names="value")
+        self.update_route()
+        advanced = widgets.Accordion(children=[widgets.VBox([
+            self.credentials, self.extra, self.budget, self.max_points,
+            self.phase_enabled, widgets.HBox([self.reference, self.units, self.sign]),
+            widgets.HTML("<p>Frequency is automatic: stored values, waveform estimates, or a verified WMU theta convention. Override only with a known convention.</p>"),
+            self.export_name, widgets.HBox([self.width, self.height, self.scale]),
+        ])], selected_index=None)
+        advanced.set_title(0, "Advanced settings")
         self.widget = widgets.VBox([
-            widgets.HTML("<h2>KGRID Explorer</h2><p>Explicit downloads · UTC plots · offline PNG/HTML exports</p>"),
-            self.credentials,
-            widgets.HBox([self.wmus, widgets.VBox([self.extra, self.mode, self.duration, self.start, self.end, self.budget])]),
-            self.products,
-            widgets.HBox([self.discover_button, self.download_button]),
+            widgets.HTML("<h2>KGRID Explorer</h2><p>Choose one device and a UTC window. Download, plot, and save PNG + offline HTML in one action.</p>"),
+            self.wmu, self.preset, widgets.HBox([self.start, self.end]), self.route,
+            widgets.HBox([self.download_button, self.discover_button]), advanced,
             widgets.HTML("<h3>Local datasets</h3>"), self.cache,
             widgets.HBox([self.load_button, self.refresh_button, self.demo_button]),
             widgets.HTML("<h3>Local plot controls</h3><p>These controls never download data. Blank bounds show all loaded coverage.</p>"),
             widgets.HBox([self.plot_start, self.plot_end]),
-            widgets.HBox([self.columns, widgets.VBox([self.max_points, self.phase_enabled, self.reference, self.units, self.sign])]),
-            widgets.HTML("<p>Theta reference/sign are not supplied in the current files. Enable derivation only with an established convention; at 2 sps, phase unwrapping can alias deviations beyond ±1 Hz.</p>"),
+            self.columns,
             self.render_button, self.status, self.output, self.plots,
             widgets.HTML("<h3>Export current zoom and trace visibility</h3>"),
-            widgets.HBox([self.export_name, self.formats]),
-            widgets.HBox([self.width, self.height, self.scale]), self.export_button,
+            self.formats, self.export_button,
         ])
+
+    def apply_preset(self, *_):
+        if self.preset.value == "custom":
+            return
+        config = json.loads((self.root / "config/plots/pjm_july22.json").read_text())
+        window = config["windows"][self.preset.value]
+        self.start.value, self.end.value = window["start_utc"], window["end_utc"]
+        self.status.value = "PJM July 22 window selected; choose 4012 (Charlottesville) or 4011 (Nashville), then Download and plot."
 
     def button(self, label, action, style=""):
         button = widgets.Button(description=label, button_style=style,
@@ -116,17 +134,22 @@ class Explorer:
         button.on_click(callback)
         return button
 
-    def update_mode(self, *_):
-        self.start.disabled = self.end.disabled = self.mode.value != "interval"
-        self.duration.disabled = self.mode.value == "interval"
+    def update_route(self, *_):
+        try:
+            selection = self.selection()
+            message = (
+                "Waveform + Parquet measurements" if selection.data_mode == "waveform_and_parquet"
+                else "Parquet measurements only — no .raw or .7z downloads"
+            )
+            self.route.value = f"<b>{selection.requested_seconds / 60:.2f} minutes:</b> {message}. Outputs: PNG + HTML."
+        except ValueError as error:
+            self.route.value = html.escape(str(error))
 
     def selection(self):
-        extra = [value.strip() for value in self.extra.value.split(",") if value.strip()]
         selected = Selection(
-            wmu_ids=tuple(dict.fromkeys([*self.wmus.value, *extra])), mode=self.mode.value,
-            duration_seconds=self.duration.value,
+            wmu_ids=(self.extra.value.strip() or self.wmu.value,), mode="interval",
             start_utc=self.start.value or None, end_utc=self.end.value or None,
-            products=tuple(self.products.value), max_download_mib=self.budget.value,
+            max_download_mib=self.budget.value,
         )
         selected.validate()
         return selected
@@ -151,7 +174,9 @@ class Explorer:
     def download(self):
         selected = self.selection()
         if self.client is None or selected != self.preview_selection:
-            raise ValueError("Discover / preview this selection before downloading")
+            self.client = KGridClient(self.credentials.value, selected.max_download_mib)
+        self.figures = {}
+        self.plots.children = ()
         self.dataset = fetch_dataset(
             self.root, selected, self.credentials.value, self.phase_convention(),
             client=self.client, progress=self.progress,
@@ -159,6 +184,11 @@ class Explorer:
         self.client = None  # A fresh download starts a fresh transfer budget.
         self.activate()
         self.refresh_cache()
+        self.formats.value = ("png", "html")
+        # Automatic first export uses a deterministic device/window name.
+        left, right = selected.bounds
+        self.export_name.value = f"wmu{selected.wmu_ids[0]}_{left.strftime('%Y%m%dT%H%M%S')}_{right.strftime('%Y%m%dT%H%M%S')}"
+        self.export()
 
     def refresh_cache(self):
         options = [(path.parent.name, str(path.parent)) for path in sorted(
@@ -168,6 +198,7 @@ class Explorer:
 
     def activate(self):
         self.plot_start.value = self.plot_end.value = ""
+        self.dataset = load_dataset(self.dataset.directory, self.phase_convention())
         display(self.dataset.summary)
         print("Dataset:", self.dataset.directory)
         for warning in self.dataset.manifest.get("warnings", []):
@@ -199,25 +230,32 @@ class Explorer:
         if start is not None and end is not None and end <= start:
             raise ValueError("Plot end must be after plot start")
         figures, widgets_to_show = {}, []
-        for product, source in (("waveform", self.dataset.waveforms), ("measurements", self.dataset.measurements)):
+        for product, source in (("waveform", self.dataset.waveforms), ("measurements", self.dataset.measurements),
+                                ("frequency", self.dataset.frequencies)):
+            columns = [column for column in self.columns.value if
+                       (column == "frequency_hz") == (product == "frequency")]
             tables = {}
             for wmu, original in source.items():
-                table = original
-                if start is not None:
-                    table = table[table.time_utc >= start]
-                if end is not None:
-                    table = table[table.time_utc < end]
+                if hasattr(original, "plot_table"):
+                    table = original.plot_table(start, end, self.max_points.value)
+                else:
+                    table = original
+                    if start is not None:
+                        table = table[table.time_utc >= start]
+                    if end is not None:
+                        table = table[table.time_utc < end]
                 if not table.empty:
                     tables[wmu] = table
-            if not tables or not any(column in table for table in tables.values() for column in self.columns.value):
+            if not columns or not tables or not any(column in table for table in tables.values() for column in columns):
                 continue
             label = "SYNTHETIC DEMO" if self.dataset.manifest.get("synthetic") else "KGRID"
-            frequency_note = (
-                " · theta-derived frequency (user convention)" if convention
-                else " · stored frequency only"
-            ) if product == "measurements" else ""
+            frequency_note = ""
+            if product == "frequency":
+                sources = list(dict.fromkeys(item["frequency_source"] for item in self.dataset.manifest["summaries"]
+                                              if item.get("product") == "frequency"))
+                frequency_note = " · " + "; ".join(sources)
             figure = go.FigureWidget(build_figure(
-                tables, self.locations, list(self.columns.value), self.max_points.value,
+                tables, self.locations, columns, self.max_points.value,
                 f"{label} {product}{frequency_note}",
             ))
             figures[product] = figure
@@ -231,13 +269,15 @@ class Explorer:
             for column in self.columns.value
             if not any(
                 column in table
-                for source in (self.dataset.waveforms, self.dataset.measurements)
+                for source in (self.dataset.waveforms, self.dataset.measurements, self.dataset.frequencies)
                 for table in source.values()
             )
         ]
         self.status.value = "Plots ready. Zoom, pan, or toggle traces; export preserves the current view."
         if unavailable:
             self.status.value += "<br>Unavailable in loaded data: " + html.escape(", ".join(unavailable))
+        for wmu, reason in self.dataset.manifest.get("frequency_unavailable", {}).items():
+            self.status.value += f"<br>WMU {html.escape(wmu)} frequency: {html.escape(reason)}"
 
     def export(self):
         if not self.figures:
@@ -250,7 +290,12 @@ class Explorer:
                 figure, directory, f"{self.export_name.value}_{product}", tuple(self.formats.value),
                 self.width.value, self.height.value, self.scale.value,
             )
-            print("\n".join(str(path) for path in outputs))
+            for path in outputs:
+                print(path)
+                # Jupyter /files/ links resolve even when the working directory is notebooks/.
+                relative = path.resolve().relative_to(self.root)
+                display(HTML(f'<a href="/files/{quote(relative.as_posix())}" target="_blank">'
+                             f'{html.escape(path.name)}</a>'))
         write_json(directory / "plot_config.resolved.json", {
             "dataset": str(self.dataset.directory), "source_manifest": self.dataset.manifest,
             "plot_start_utc": self.plot_start.value or None,

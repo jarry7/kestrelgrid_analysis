@@ -21,6 +21,9 @@ dependencies = [
 [dependency-groups]
 dev = ["pytest>=8,<9", "ruff>=0.11", "nbclient>=0.10", "nbformat>=5"]
 
+[project.scripts]
+kgrid-notebook = "kestrelgrid_tools.launch:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

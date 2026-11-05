@@ -21,6 +21,16 @@ class RemoteFile:
     def kind(self):
         return self.name.rsplit(".", 1)[-1].lower()
 
+    @property
+    def end(self):
+        from datetime import timedelta
+
+        zone = ZoneInfo("America/Los_Angeles")
+        hourly = len(self.name.split(".")[0]) > 10
+        if hourly:
+            return self.start + timedelta(hours=1)
+        return (self.start.astimezone(zone) + timedelta(days=1)).astimezone(timezone.utc)
+
 
 def parse_listing(html: str, base_url: str, wmu: str, partition_timezone="America/Los_Angeles") -> list[RemoteFile]:
     result = []
@@ -67,17 +77,11 @@ def select_files(files, kinds, start=None, end=None):
         candidates = [item for item in candidates if item.start == newest]
     else:
         # Partition width is determined by the observed filename, not assumed cadence.
-        from datetime import timedelta
-
-        local_zone = ZoneInfo("America/Los_Angeles")
         candidates = [
             item
             for item in candidates
             if item.start < end
-            and (
-                item.start.astimezone(local_zone)
-                + timedelta(hours=1 if len(item.name.split(".")[0]) > 10 else 24)
-            ).astimezone(timezone.utc) > start
+            and item.end > start
         ]
     # Prefer uncompressed raw when both versions of the same partition exist.
     raw_starts = {item.start for item in candidates if item.kind == "raw"}

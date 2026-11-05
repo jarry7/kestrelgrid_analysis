@@ -101,6 +101,7 @@ def test_range_frame_search_exact_interval(tmp_path, raw_bytes):
         return data[start:end + 1]
 
     client.range = get_range
+    client.range_response = lambda url, start, end, meta: Response(206, get_range(url, start, end, meta))
     from datetime import datetime, timezone
 
     remote = RemoteFile("4021", "2023-11-14.raw", BASE_URL + "4021/file.raw", datetime.now(timezone.utc), "1M")
@@ -122,6 +123,7 @@ def test_changed_source_rejected(tmp_path, raw_bytes):
     metadata = {"size": len(data), "etag": '"fixed"', "last_modified": None}
     client.metadata = Mock(side_effect=[metadata, {**metadata, "etag": '"changed"'}])
     client.range = lambda _, start, end, meta: data[start:end + 1]
+    client.range_response = lambda _, start, end, meta: Response(206, data[start:end + 1])
     from datetime import datetime, timezone
 
     remote = RemoteFile("4021", "sample.raw", BASE_URL + "4021/sample.raw", datetime.now(timezone.utc), "1M")
