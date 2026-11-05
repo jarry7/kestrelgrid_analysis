@@ -18,7 +18,10 @@ BASE_URL = "https://data.kestrelgrid.com/"
 
 
 class KGridClient:
+    """Authenticated serial KGRID client with verified TLS and a cumulative byte budget."""
+
     def __init__(self, credentials=None, max_download_mib=100, session=None):
+        """Configure system TLS trust, credentials and retries, or use an injected session."""
         truststore.inject_into_ssl()
         self.session = session or requests.Session()
         self.session.headers.update({"Accept-Encoding": "identity"})
@@ -32,13 +35,17 @@ class KGridClient:
 
     @property
     def remaining(self):
+        """Return the unconsumed transfer budget in bytes."""
         return self.max_bytes - self.transferred
 
     def request(self, method, url, **kwargs):
+        """Open a streamed same-host HTTPS response; reject redirects and auth failures."""
         parsed = urlsplit(url)
         if (
-            parsed.scheme != "https" or parsed.netloc != urlsplit(BASE_URL).netloc
-            or parsed.query or parsed.fragment
+            parsed.scheme != "https"
+            or parsed.netloc != urlsplit(BASE_URL).netloc
+            or parsed.query
+            or parsed.fragment
         ):
             raise ValueError("Only the approved KGRID HTTPS host is allowed")
         response = self.session.request(
@@ -59,6 +66,7 @@ class KGridClient:
         return response
 
     def body(self, response, limit):
+        """Read a bounded probe into bytes, verify its length and close the response."""
         try:
             declared = response.headers.get("Content-Length")
             if declared and int(declared) > min(limit, self.remaining):
@@ -78,6 +86,7 @@ class KGridClient:
             response.close()
 
     def discover(self, wmu):
+        """Fetch and cache a numeric WMU's parsed directory listing."""
         if not str(wmu).isdigit():
             raise ValueError("WMU IDs must be numeric")
         if wmu not in self.listings:
@@ -87,6 +96,7 @@ class KGridClient:
         return self.listings[wmu]
 
     def metadata(self, url):
+        """Return HEAD size, ETag and modification time; require an exposed file size."""
         with self.request("HEAD", url) as response:
             if not response.headers.get("Content-Length"):
                 raise ValueError("Server does not expose file size")
@@ -97,9 +107,11 @@ class KGridClient:
             }
 
     def range(self, url, start, end, metadata):
+        """Read a verified inclusive byte range into memory for small frame probes."""
         return self.body(self.range_response(url, start, end, metadata), end - start + 1)
 
     def range_response(self, url, start, end, metadata):
+        """Open HTTP 206 with exact Content-Range and unchanged ETag within the budget."""
         if not 0 <= start <= end < metadata["size"]:
             raise ValueError("Invalid byte range")
         length = end - start + 1
@@ -144,6 +156,11 @@ class KGridClient:
             response.close()
 
     def download(self, remote, destination: Path):
+        """Reuse a hash-verified full download or stream a stable source to disk.
+
+        Persist source metadata and SHA-256 in a sidecar. Reject HTML, oversized or
+        changing sources and replace the destination only after a complete transfer.
+        """
         metadata = self.metadata(remote.url)
         sidecar = destination.with_suffix(destination.suffix + ".json")
         if destination.exists() and sidecar.exists():
@@ -151,7 +168,8 @@ class KGridClient:
 
             record = json.loads(sidecar.read_text())
             if (
-                record.get("remote") == metadata and record.get("url") == remote.url
+                record.get("remote") == metadata
+                and record.get("url") == remote.url
                 and record.get("sha256") == sha256(destination)
             ):
                 return record
@@ -175,7 +193,7 @@ class KGridClient:
         write_json(sidecar, record)
         return record
 
-    def estimate_raw_transfer(self, remote, start, end, duration=60):
+    def estimate_raw_transfer(self, remote, start, end):
         """Read first/last headers; estimate bytes without retrieving the waveform interval."""
         metadata = self.metadata(remote.url)
         first = header_at(self.range(remote.url, 0, 87, metadata))
@@ -183,12 +201,14 @@ class KGridClient:
         tail = self.range(remote.url, max(0, size - 3 * MAX_FRAME_BYTES), size - 1, metadata)
         _, _, frames = align_frames(tail, remote.wmu)
         last = frames[-1]
-        left = max(start.timestamp(), first.timestamp) if start is not None else last.end - duration
-        right = min(end.timestamp(), last.end) if end is not None else last.end
+        left = max(start.timestamp(), first.timestamp)
+        right = min(end.timestamp(), last.end)
         seconds = max(0, right - left)
         rate = max(first.rate_hz, last.rate_hz)
-        bytes_per_second = max(first.n_bytes * first.rate_hz / first.n_samples,
-                               last.n_bytes * last.rate_hz / last.n_samples)
+        bytes_per_second = max(
+            first.n_bytes * first.rate_hz / first.n_samples,
+            last.n_bytes * last.rate_hz / last.n_samples,
+        )
         return {
             "payload_estimate_bytes": int(seconds * bytes_per_second + 2 * MAX_FRAME_BYTES),
             "probe_allowance_bytes": 8 * 1024**2,
@@ -197,7 +217,7 @@ class KGridClient:
             "remote": metadata,
         }
 
-    def raw_sample(self, remote, destination, duration=60, start=None, end=None, max_samples=240_000_000):
+    def raw_sample(self, remote, destination, start, end, max_samples=240_000_000):
         """Locate frame bounds by bounded probes; fetch only complete selected frames."""
         metadata = self.metadata(remote.url)
         size = metadata["size"]
@@ -210,19 +230,14 @@ class KGridClient:
             raise ValueError("Archive has an incomplete trailing frame")
         first_data = self.range(remote.url, 0, min(size - 1, 87), metadata)
         first = header_at(first_data)
-        if start is None:
-            end = tail_frames[-1].end
-            start = end - duration
-        else:
-            start, end = float(start), float(end)
-            start = max(start, first.timestamp)
-            end = min(end, tail_frames[-1].end)
+        start, end = max(float(start), first.timestamp), min(float(end), tail_frames[-1].end)
         if end <= start:
             raise ValueError("End must be after start")
         if (end - start) * max(frame.rate_hz for frame in tail_frames) > max_samples:
             raise ValueError("Requested waveform interval exceeds sample-memory limit")
 
         def lower_bound(target):
+            """Locate the first frame at or after an epoch timestamp using bounded probes."""
             lo, hi = 0, size
             for _ in range(40):
                 if hi - lo <= probe_size:
@@ -250,7 +265,9 @@ class KGridClient:
         byte_start = lower_bound(start)
         preceding_start = max(0, byte_start - probe_size)
         if byte_start > 0:
-            data = self.range(remote.url, preceding_start, min(size - 1, byte_start + probe_size - 1), metadata)
+            data = self.range(
+                remote.url, preceding_start, min(size - 1, byte_start + probe_size - 1), metadata
+            )
             _, skip, frames = align_frames(data, remote.wmu)
             overlapping = [frame for frame in frames if frame.timestamp < start < frame.end]
             if overlapping:
@@ -279,9 +296,15 @@ class KGridClient:
             raise
         part.replace(destination)
         return {
-            "url": remote.url, "remote": metadata, "byte_range": [byte_start, byte_end - 1],
-            "sha256": sha256(destination), "requested_start": start, "requested_end": end,
-            "frame_start_utc": pd.to_datetime(first_selected.timestamp, unit="s", utc=True).isoformat(),
+            "url": remote.url,
+            "remote": metadata,
+            "byte_range": [byte_start, byte_end - 1],
+            "sha256": sha256(destination),
+            "requested_start": start,
+            "requested_end": end,
+            "frame_start_utc": pd.to_datetime(
+                first_selected.timestamp, unit="s", utc=True
+            ).isoformat(),
             "frame_end_utc": pd.to_datetime(last_selected.end, unit="s", utc=True).isoformat(),
             "partial_source_download": True,
         }

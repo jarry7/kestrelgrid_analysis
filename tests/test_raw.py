@@ -1,3 +1,5 @@
+"""Raw alignment, structural validation, upstream scaling and CSV tests."""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,6 +9,7 @@ from kestrelgrid_tools.raw_validation import align_frames, validate_raw
 
 
 def test_alignment_and_truncation_detection(raw_bytes):
+    """Find consecutive frame boundaries and reject truncated or mismatched raw data."""
     data = raw_bytes()
     frames = validate_raw(data, "4021")
     assert len(frames) == 8
@@ -21,6 +24,7 @@ def test_alignment_and_truncation_detection(raw_bytes):
 
 
 def test_upstream_decode_clip_scale_and_csv(tmp_path, raw_bytes):
+    """Verify package scaling, exact clipping, CSV row counts and sample-memory limits."""
     path = tmp_path / "sample.raw"
     path.write_bytes(raw_bytes(count=4))
     start = pd.to_datetime(1_700_000_000.25, unit="s", utc=True)

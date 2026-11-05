@@ -11,6 +11,8 @@ MAX_FRAME_BYTES = 32767  # Upstream format uses a signed int16 length.
 
 @dataclass
 class FrameInfo:
+    """Validated frame offset, sample dimensions, timestamp and sensor quality fields."""
+
     offset: int
     n_bytes: int
     n_samples: int
@@ -22,10 +24,12 @@ class FrameInfo:
 
     @property
     def end(self):
+        """Return the exclusive frame end in epoch seconds using its sample rate."""
         return self.timestamp + self.n_samples / self.rate_hz
 
 
 def header_at(data: bytes, offset: int = 0) -> FrameInfo:
+    """Decode and validate an upstream raw header at a byte offset."""
     header = RawHeader(io.BytesIO(data[offset : offset + HEADER_LENGTH_BYTES]))
     if (
         header.n_samples <= 0
@@ -37,12 +41,24 @@ def header_at(data: bytes, offset: int = 0) -> FrameInfo:
     ):
         raise ValueError("Invalid raw frame dimensions, timestamp, or scale")
     return FrameInfo(
-        offset, header.n_bytes, header.n_samples, header.sample_rate * 1000,
-        header.timestamp, str(header.pmu_id), header.gps_locked, header.boot_count,
+        offset,
+        header.n_bytes,
+        header.n_samples,
+        header.sample_rate * 1000,
+        header.timestamp,
+        str(header.pmu_id),
+        header.gps_locked,
+        header.boot_count,
     )
 
 
-def validate_raw(data: bytes, expected_wmu: str | None = None, allow_time_discontinuities=False) -> list[FrameInfo]:
+def validate_raw(
+    data: bytes, expected_wmu: str | None = None, allow_time_discontinuities=False
+) -> list[FrameInfo]:
+    """Validate all complete frames, rejecting truncated data and mismatched sensor IDs.
+
+    Timestamp ordering is strict unless explicitly relaxed for quality-aware normalization.
+    """
     frames = []
     offset = 0
     while offset < len(data):
@@ -54,8 +70,10 @@ def validate_raw(data: bytes, expected_wmu: str | None = None, allow_time_discon
             raise ValueError(f"Truncated raw payload at byte {offset}")
         if expected_wmu is not None and frame.wmu != str(expected_wmu):
             raise ValueError("Raw sensor ID does not match selected WMU")
-        if frames and (frame.wmu != frames[0].wmu or
-                       (frame.timestamp <= frames[-1].timestamp and not allow_time_discontinuities)):
+        if frames and (
+            frame.wmu != frames[0].wmu
+            or (frame.timestamp <= frames[-1].timestamp and not allow_time_discontinuities)
+        ):
             raise ValueError("Mixed sensors or unordered raw frame timestamps")
         frames.append(frame)
         offset += frame.n_bytes
@@ -80,8 +98,10 @@ def iter_raw_frames(path, expected_wmu=None, allow_time_discontinuities=False):
                 raise ValueError(f"Truncated raw payload at byte {offset}")
             if expected_wmu is not None and frame.wmu != str(expected_wmu):
                 raise ValueError("Raw sensor ID does not match selected WMU")
-            if previous and (frame.wmu != previous.wmu or
-                             (frame.timestamp <= previous.timestamp and not allow_time_discontinuities)):
+            if previous and (
+                frame.wmu != previous.wmu
+                or (frame.timestamp <= previous.timestamp and not allow_time_discontinuities)
+            ):
                 raise ValueError("Mixed sensors or unordered raw frame timestamps")
             yield frame
             previous = frame

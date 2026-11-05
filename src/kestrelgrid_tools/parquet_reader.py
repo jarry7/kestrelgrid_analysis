@@ -19,9 +19,19 @@ ALIASES = {
 
 
 def read_measurements(
-    path: Path, wmu: str, start=None, end=None, convention: PhaseConvention | None = None,
-    timestamp_unit="s", max_rows=2_000_000,
+    path: Path,
+    wmu: str,
+    start=None,
+    end=None,
+    convention: PhaseConvention | None = None,
+    timestamp_unit="s",
+    max_rows=2_000_000,
 ):
+    """Read recognized measurement columns, normalize UTC times and report quality.
+
+    Numeric timestamps use ``timestamp_unit`` (seconds by default); naive timestamps and
+    unknown schemas raise ValueError. Optional theta conversion never replaces stored Hz.
+    """
     parquet = pq.ParquetFile(path)
     if parquet.metadata.num_rows > max_rows:
         raise ValueError("Parquet row count exceeds memory limit")
@@ -60,7 +70,8 @@ def read_measurements(
     elif "theta" in table and convention is not None:
         table["frequency_hz"] = phase_frequency(
             table.time_utc.astype("int64").to_numpy() / 1e9,
-            table.theta.to_numpy(), convention,
+            table.theta.to_numpy(),
+            convention,
         )
         frequency_source = "derived from theta under user-specified convention"
     if start is not None:
@@ -72,10 +83,14 @@ def read_measurements(
     positive = dt[dt > 0]
     cadence = float(positive.median()) if len(positive) else None
     summary = {
-        "wmu": str(wmu), "original_schema": schema, "column_mapping": columns,
+        "wmu": str(wmu),
+        "original_schema": schema,
+        "column_mapping": columns,
         "numeric_timestamp_unit": timestamp_unit,
-        "sample_count": len(table), "cadence_seconds": cadence,
-        "duplicate_timestamps": duplicates, "source_unordered": unordered,
+        "sample_count": len(table),
+        "cadence_seconds": cadence,
+        "duplicate_timestamps": duplicates,
+        "source_unordered": unordered,
         "gaps": int((dt > 1.5 * cadence).sum()) if cadence else 0,
         "frequency_source": frequency_source,
         "phase_convention": convention.to_dict() if convention else None,

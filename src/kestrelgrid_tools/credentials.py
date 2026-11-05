@@ -9,6 +9,11 @@ DEFAULT_PATH = Path("~/.config/kestrelgrid/credentials.json")
 
 
 def load_credentials(path: str | Path | None = None) -> tuple[str, str]:
+    """Load username/password from owner-only JSON selected by path or environment.
+
+    Raise PermissionError for broad POSIX permissions and ValueError for invalid fields.
+    Credentials are returned to the HTTP client and must not be logged.
+    """
     path = Path(path or os.environ.get("KESTRELGRID_CREDENTIALS", DEFAULT_PATH)).expanduser()
     if not path.is_file():
         raise FileNotFoundError(f"Create the local credential file at {path}; see README.md")

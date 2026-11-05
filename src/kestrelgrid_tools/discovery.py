@@ -11,6 +11,8 @@ from bs4 import BeautifulSoup
 
 @dataclass(frozen=True)
 class RemoteFile:
+    """A discovered source partition with WMU, URL, filename and UTC start time."""
+
     wmu: str
     name: str
     url: str
@@ -19,10 +21,12 @@ class RemoteFile:
 
     @property
     def kind(self):
+        """Return the lower-case raw, 7z or Parquet extension."""
         return self.name.rsplit(".", 1)[-1].lower()
 
     @property
     def end(self):
+        """Return the partition end, respecting Pacific DST for daily filenames."""
         from datetime import timedelta
 
         zone = ZoneInfo("America/Los_Angeles")
@@ -32,7 +36,10 @@ class RemoteFile:
         return (self.start.astimezone(zone) + timedelta(days=1)).astimezone(timezone.utc)
 
 
-def parse_listing(html: str, base_url: str, wmu: str, partition_timezone="America/Los_Angeles") -> list[RemoteFile]:
+def parse_listing(
+    html: str, base_url: str, wmu: str, partition_timezone="America/Los_Angeles"
+) -> list[RemoteFile]:
+    """Parse safe same-host date/hour filenames into sorted recording partitions."""
     result = []
     base = urlsplit(base_url)
     for link in BeautifulSoup(html, "html.parser").find_all("a", href=True):
@@ -54,9 +61,11 @@ def parse_listing(html: str, base_url: str, wmu: str, partition_timezone="Americ
             continue
         date, hour, minute, _ = match.groups()
         try:
-            start = datetime.fromisoformat(f"{date}T{hour or '00'}:{minute or '00'}:00").replace(
-                tzinfo=ZoneInfo(partition_timezone)
-            ).astimezone(timezone.utc)
+            start = (
+                datetime.fromisoformat(f"{date}T{hour or '00'}:{minute or '00'}:00")
+                .replace(tzinfo=ZoneInfo(partition_timezone))
+                .astimezone(timezone.utc)
+            )
         except ValueError:
             continue
         label = str(link.next_sibling or "").strip().split()
@@ -64,25 +73,9 @@ def parse_listing(html: str, base_url: str, wmu: str, partition_timezone="Americ
     return sorted(result, key=lambda item: (item.start, item.name))
 
 
-def select_files(files, kinds, start=None, end=None):
-    """Select daily/hourly partitions. Latest selects a closed date partition."""
+def select_files(files, kinds, start, end):
+    """Select overlapping daily/hourly partitions, preferring raw to duplicate 7z files."""
     candidates = [item for item in files if item.kind in kinds]
-    if start is None:
-        local_zone = ZoneInfo("America/Los_Angeles")
-        today = datetime.now(local_zone).date()
-        candidates = [item for item in candidates if item.start.astimezone(local_zone).date() < today]
-        if not candidates:
-            raise ValueError("No closed recording partitions found")
-        newest = max(item.start for item in candidates)
-        candidates = [item for item in candidates if item.start == newest]
-    else:
-        # Partition width is determined by the observed filename, not assumed cadence.
-        candidates = [
-            item
-            for item in candidates
-            if item.start < end
-            and item.end > start
-        ]
-    # Prefer uncompressed raw when both versions of the same partition exist.
+    candidates = [item for item in candidates if item.start < end and item.end > start]
     raw_starts = {item.start for item in candidates if item.kind == "raw"}
     return [item for item in candidates if item.kind != "7z" or item.start not in raw_starts]

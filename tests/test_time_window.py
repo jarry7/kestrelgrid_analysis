@@ -1,3 +1,5 @@
+"""Duration-based routing, bounded hour decoding and interactive download tests."""
+
 import json
 from unittest.mock import Mock
 
@@ -12,15 +14,30 @@ from kestrelgrid_tools.waveform_store import normalize_waveform
 from kestrelgrid_tools.workflow import Selection, fetch_dataset, load_dataset, preview
 
 
-@pytest.mark.parametrize("seconds,expected", [(3599, "waveform_and_parquet"), (3600, "waveform_and_parquet"), (3600.001, "parquet_only"), (86400, "parquet_only")])
+@pytest.mark.parametrize(
+    "seconds,expected",
+    [
+        (3599, "waveform_and_parquet"),
+        (3600, "waveform_and_parquet"),
+        (3600.001, "parquet_only"),
+        (86400, "parquet_only"),
+    ],
+)
 def test_duration_routing_enforced_before_download(seconds, expected):
+    """Route windows beyond one hour exclusively to Parquet before payload transfer."""
     start = pd.Timestamp("2026-11-04T12:00:00Z")
-    selection = Selection(start_utc=start.isoformat(), end_utc=(start + pd.Timedelta(seconds=seconds)).isoformat())
+    selection = Selection(
+        start_utc=start.isoformat(), end_utc=(start + pd.Timedelta(seconds=seconds)).isoformat()
+    )
     selection.validate()
     assert selection.data_mode == expected
-    files = parse_listing('''<a href="2026-11-04.raw">raw</a>
+    files = parse_listing(
+        """<a href="2026-11-04.raw">raw</a>
         <a href="2026-11-04.7z">compressed</a>
-        <a href="2026-11-04.parquet">measurements</a>''', "https://data.kestrelgrid.com/4021/", "4021")
+        <a href="2026-11-04.parquet">measurements</a>""",
+        "https://data.kestrelgrid.com/4021/",
+        "4021",
+    )
     client = Mock()
     client.discover.return_value = files
     rows = preview(client, selection)
@@ -31,10 +48,15 @@ def test_duration_routing_enforced_before_download(seconds, expected):
 
 
 def test_long_window_only_transfers_parquet_and_preserves_native_cadence(tmp_path):
-    files = parse_listing('''<a href="2026-11-04.raw">raw</a>
+    """Fetch multiple Parquet partitions, deduplicate them and preserve native cadence."""
+    files = parse_listing(
+        """<a href="2026-11-04.raw">raw</a>
         <a href="2026-11-04.7z">zip</a>
         <a href="2026-11-04.parquet">parquet</a>
-        <a href="2026-11-05.parquet">parquet</a>''', "https://data.kestrelgrid.com/4021/", "4021")
+        <a href="2026-11-05.parquet">parquet</a>""",
+        "https://data.kestrelgrid.com/4021/",
+        "4021",
+    )
     client = Mock()
     client.discover.return_value = files
     client.transferred = 0
@@ -43,12 +65,19 @@ def test_long_window_only_transfers_parquet_and_preserves_native_cadence(tmp_pat
     selected = []
 
     def download(remote, destination):
+        """Write synthetic overlapping partition measurements and record product choices."""
         selected.append(remote.kind)
         destination.parent.mkdir(parents=True, exist_ok=True)
         # Overlap at the partition boundary tests duplicate reconciliation.
-        t = pd.Timestamp("2026-11-05T07:30:00Z") if "11-04" in remote.name else pd.Timestamp("2026-11-05T08:00:00Z")
+        t = (
+            pd.Timestamp("2026-11-05T07:30:00Z")
+            if "11-04" in remote.name
+            else pd.Timestamp("2026-11-05T08:00:00Z")
+        )
         count = 3601 if "11-04" in remote.name else 3600
-        table = pd.DataFrame({"t": t.timestamp() + np.arange(count) / 2, "rms": 120.0, "frequency": 60.01})
+        table = pd.DataFrame(
+            {"t": t.timestamp() + np.arange(count) / 2, "rms": 120.0, "frequency": 60.01}
+        )
         table.to_parquet(destination)
         return {"sha256": sha256(destination), "url": remote.url}
 
@@ -68,15 +97,21 @@ def test_long_window_only_transfers_parquet_and_preserves_native_cadence(tmp_pat
 
 
 def test_missing_partition_reported(tmp_path):
-    files = parse_listing('<a href="2026-11-04.parquet">parquet</a>', "https://data.kestrelgrid.com/4021/", "4021")
+    """Report missing source coverage without replacing the requested window."""
+    files = parse_listing(
+        '<a href="2026-11-04.parquet">parquet</a>', "https://data.kestrelgrid.com/4021/", "4021"
+    )
     client = Mock()
     client.discover.return_value = files
     client.metadata.return_value = {"size": 1}
     client.remaining, client.transferred = 10000, 0
 
     def download(remote, path):
+        """Write a sparse fixture for the only available measurement partition."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame({"t": [pd.Timestamp("2026-11-05T07:30:00Z").timestamp()], "rms": [120.0]}).to_parquet(path)
+        pd.DataFrame(
+            {"t": [pd.Timestamp("2026-11-05T07:30:00Z").timestamp()], "rms": [120.0]}
+        ).to_parquet(path)
         return {"sha256": sha256(path)}
 
     client.download.side_effect = download
@@ -87,6 +122,7 @@ def test_missing_partition_reported(tmp_path):
 
 
 def test_full_hour_chunked_decoding_and_local_cycle_view(tmp_path, raw_bytes, monkeypatch):
+    """Normalize a full hour in bounded chunks and reload a full-resolution local cycle."""
     import kestrelgrid_tools.waveform_store as module
 
     path = tmp_path / "hour.raw"
@@ -95,6 +131,7 @@ def test_full_hour_chunked_decoding_and_local_cycle_view(tmp_path, raw_bytes, mo
     chunks = []
 
     def decode(path, *args, **kwargs):
+        """Record raw chunk sizes while delegating decoding to the public reader adapter."""
         chunks.append(path.stat().st_size)
         return original(path, *args, **kwargs)
 
@@ -115,10 +152,13 @@ def test_full_hour_chunked_decoding_and_local_cycle_view(tmp_path, raw_bytes, mo
 
 
 def test_one_action_interface_automatically_exports(tmp_path, monkeypatch):
+    """Export all three available product figures from the one-action notebook entry point."""
     from kestrelgrid_tools.workflow import demo_dataset
 
     (tmp_path / "config").mkdir()
-    (tmp_path / "config/wmu_locations.json").write_text(json.dumps({"4021": {"location": "Vancouver"}}))
+    (tmp_path / "config/wmu_locations.json").write_text(
+        json.dumps({"4021": {"location": "Vancouver"}})
+    )
     explorer = Explorer(tmp_path)
     explorer.start.value, explorer.end.value = "2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z"
     assert explorer.selection().wmu_ids == ("4021",)
@@ -126,10 +166,13 @@ def test_one_action_interface_automatically_exports(tmp_path, monkeypatch):
     explorer.end.value = "2026-01-01T02:00:00Z"
     assert "Parquet measurements only" in explorer.route.value
     monkeypatch.setattr("kestrelgrid_tools.explorer.KGridClient", Mock())
-    monkeypatch.setattr("kestrelgrid_tools.explorer.fetch_dataset", lambda *a, **k: demo_dataset(tmp_path))
+    monkeypatch.setattr(
+        "kestrelgrid_tools.explorer.fetch_dataset", lambda *a, **k: demo_dataset(tmp_path)
+    )
     outputs = []
 
     def export(figure, directory, name, formats, *args):
+        """Record requested output formats and filenames without rendering PNGs."""
         outputs.append((name, formats))
         return []
 
@@ -141,16 +184,21 @@ def test_one_action_interface_automatically_exports(tmp_path, monkeypatch):
 
 
 def test_waveform_store_cross_partition_dedup_and_gap(tmp_path):
+    """Reconcile overlapping partition samples while preserving a true recording gap."""
     from kestrelgrid_tools.waveform_store import WaveformStore
 
     paths = []
     for number, times in enumerate(([0.0, 0.25, 0.5], [0.5, 0.75, 1.0], [2.0, 2.25])):
         path = tmp_path / f"{number}.parquet"
-        pd.DataFrame({
-            "time_utc": pd.to_datetime(times, unit="s", utc=True),
-            "voltage_v": np.arange(len(times), dtype=float), "wmu": "4021",
-            "gps_locked": True, "segment": 0,
-        }).to_parquet(path, index=False)
+        pd.DataFrame(
+            {
+                "time_utc": pd.to_datetime(times, unit="s", utc=True),
+                "voltage_v": np.arange(len(times), dtype=float),
+                "wmu": "4021",
+                "gps_locked": True,
+                "segment": 0,
+            }
+        ).to_parquet(path, index=False)
         paths.append(path)
     table = WaveformStore(paths).to_dataframe()
     assert len(table) == 7

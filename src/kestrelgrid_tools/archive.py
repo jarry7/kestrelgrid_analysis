@@ -6,12 +6,20 @@ from pathlib import Path, PurePosixPath
 
 
 def extract_raw(archive: Path, destination: Path, max_extracted_bytes=1024**3):
+    """Inspect and extract a 7z archive into a new directory, returning raw members.
+
+    Reject unsafe paths, links and oversized contents. Remove incomplete extraction on
+    failure; require a locally installed 7zz/7z executable.
+    """
     executable = shutil.which("7zz") or shutil.which("7z")
     if not executable:
         raise RuntimeError("Install 7-Zip for .7z files (macOS: brew install sevenzip)")
     listing = subprocess.run(
         [executable, "l", "-slt", "--", str(archive.resolve())],
-        capture_output=True, text=True, check=True, timeout=60,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
     ).stdout
     if "----------" not in listing:
         raise ValueError("Could not inspect archive members")
@@ -32,9 +40,14 @@ def extract_raw(archive: Path, destination: Path, max_extracted_bytes=1024**3):
     try:
         subprocess.run(
             [executable, "x", "-y", f"-o{destination.resolve()}", "--", str(archive.resolve())],
-            capture_output=True, check=True, timeout=300,
+            capture_output=True,
+            check=True,
+            timeout=300,
         )
-        if sum(path.stat().st_size for path in destination.rglob("*") if path.is_file()) > max_extracted_bytes:
+        if (
+            sum(path.stat().st_size for path in destination.rglob("*") if path.is_file())
+            > max_extracted_bytes
+        ):
             raise ValueError("Extracted data exceeds size limit")
         result = list(destination.rglob("*.raw"))
         if not result:

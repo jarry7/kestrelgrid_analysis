@@ -1,6 +1,5 @@
 {
   "wmu_ids": ["4021"],
-  "mode": "interval",
   "start_utc": "2026-11-05T07:59:00Z",
   "end_utc": "2026-11-05T08:00:00Z",
   "max_download_mib": 100,

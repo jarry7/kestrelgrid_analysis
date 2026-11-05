@@ -1,3 +1,5 @@
+"""Phase timing quality and recognized measurement schema tests."""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,6 +9,7 @@ from kestrelgrid_tools.parquet_reader import read_measurements
 
 
 def test_phase_known_frequency_gaps_and_duplicates():
+    """Recover a known offset without deriving across gaps or duplicate times."""
     t = np.r_[np.arange(10) / 2, 10 + np.arange(10) / 2]
     theta = np.angle(np.exp(1j * 2 * np.pi * 0.1 * t))
     result = phase_frequency(t, theta, PhaseConvention())
@@ -17,6 +20,7 @@ def test_phase_known_frequency_gaps_and_duplicates():
 
 
 def test_parquet_current_and_updated_schema(tmp_path):
+    """Read theta and stored-frequency products and reject unknown schemas."""
     path = tmp_path / "measurements.parquet"
     t = 1_700_000_000 + np.arange(20) / 2
     df = pd.DataFrame({"t": t, "theta": 2 * np.pi * 0.1 * t, "rms": 120.0, "gps": True})

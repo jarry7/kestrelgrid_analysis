@@ -1,3 +1,5 @@
+"""Notebook export links, event presets and anomalous raw-timing regressions."""
+
 import struct
 from pathlib import Path
 
@@ -13,6 +15,7 @@ from kestrelgrid_tools.workflow import demo_dataset
 
 
 def test_backward_frames_are_reported_and_excluded_without_upstream_skip(tmp_path, raw_bytes):
+    """Report and exclude backward samples without silently losing upstream frames."""
     data = raw_bytes(count=8)
     frame_bytes = 8088
     # Repeated header at frame 3 then an overlapping backwards frame at frame 4.
@@ -35,6 +38,7 @@ def test_backward_frames_are_reported_and_excluded_without_upstream_skip(tmp_pat
 
 
 def test_export_links_work_from_notebooks_working_directory(tmp_path, monkeypatch):
+    """Generate valid repository-root links from a nested kernel working directory."""
     (tmp_path / "config").mkdir()
     (tmp_path / "config/wmu_locations.json").write_text('{"4021":{"location":"Vancouver"}}')
     (tmp_path / "notebooks").mkdir()
@@ -45,6 +49,7 @@ def test_export_links_work_from_notebooks_working_directory(tmp_path, monkeypatc
     monkeypatch.setattr("kestrelgrid_tools.explorer.display", shown.append)
 
     def export(figure, directory, name, formats, *args):
+        """Create a fixture HTML export for link validation without browser dependencies."""
         directory.mkdir(exist_ok=True, parents=True)
         path = directory / (name + ".html")
         path.write_text("test")
@@ -54,11 +59,12 @@ def test_export_links_work_from_notebooks_working_directory(tmp_path, monkeypatc
     monkeypatch.chdir(tmp_path / "notebooks")
     explorer.export()
     assert len(shown) == 3
-    assert all('/files/data/processed/synthetic_demo/plots/' in item.data for item in shown)
+    assert all("/files/data/analyses/synthetic-demo/" in item.data for item in shown)
     assert all("doesn't exist" not in item.data for item in shown)
 
 
 def test_pjm_presets_timezone_duration_and_routing():
+    """Map event presets to UTC and retain the strict one-hour product boundary."""
     root = Path(__file__).resolve().parents[1]
     explorer = Explorer(root)
     explorer.wmu.value = "4012"
